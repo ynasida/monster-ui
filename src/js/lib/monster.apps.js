@@ -17,6 +17,17 @@ define(function() {
 			var self = this,
 				hasClusterFlag = monster.config.hasOwnProperty('kazooClusterId');
 
+			app.css = (function(original) {
+				var css = [];
+				if (_.isArray(original)) {
+					css = _.clone(original);
+				}
+				if (!_.includes(css, 'app')) {
+					css.unshift('app');
+				}
+				return css;
+			}(app.css));
+
 			_.each(app.requests, function(request, id) {
 				if (hasClusterFlag) {
 					request.headers = request.headers || {};
