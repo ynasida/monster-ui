@@ -27,6 +27,18 @@ define(function() {
 				}
 				return css;
 			}(app.css));
+			app.i18n = (function(original) {
+				var i18n = {};
+				if (_.isObject(original)) {
+					i18n = _.clone(original);
+				}
+				if (!i18n.hasOwnProperty(self.defaultLanguage)) {
+					i18n[self.defaultLanguage] = {
+						customCss: false
+					};
+				}
+				return i18n;
+			}(app.i18n));
 
 			_.each(app.requests, function(request, id) {
 				if (hasClusterFlag) {
