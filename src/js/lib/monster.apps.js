@@ -3,6 +3,8 @@ define(function() {
 		_ = require('lodash'),
 		monster = require('monster');
 
+	var coreAppsWithoutInit = ['auth', 'core'];
+
 	var apps = {
 		defaultLanguage: 'en-US',
 
@@ -39,6 +41,29 @@ define(function() {
 				}
 				return i18n;
 			}(app.i18n));
+			app.initApp = (function(original) {
+				var initApp;
+				if (_.includes(coreAppsWithoutInit, app.name)) {
+					initApp = undefined;
+				} else if (_.isFunction(original)) {
+					initApp = function(callback) {
+						original.call(app, function() {
+							monster.pub('auth.initApp', {
+								app: app,
+								callback: callback
+							});
+						});
+					};
+				} else {
+					initApp = function(callback) {
+						monster.pub('auth.initApp', {
+							app: app,
+							callback: callback
+						});
+					};
+				}
+				return initApp;
+			}(app.initApp));
 
 			_.each(app.requests, function(request, id) {
 				if (hasClusterFlag) {
