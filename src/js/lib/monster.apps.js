@@ -3,7 +3,15 @@ define(function() {
 		_ = require('lodash'),
 		monster = require('monster');
 
-	var coreAppsWithoutInit = ['auth', 'core'];
+	var coreAppsWithoutInit = [
+		'auth',
+		'core'
+	];
+	var coreAppsWithCustomLoad = [
+		'auth',
+		'core',
+		'myaccount'
+	];
 
 	var apps = {
 		defaultLanguage: 'en-US',
@@ -64,6 +72,27 @@ define(function() {
 				}
 				return initApp;
 			}(app.initApp));
+			app.load = (function(original) {
+				var load;
+				if (_.includes(coreAppsWithCustomLoad, app.name)) {
+					load = original;
+				} else if (_.isFunction(original)) {
+					load = function(callback) {
+						original.call(app, function() {
+							app.initApp(function() {
+								callback && callback(app);
+							});
+						});
+					};
+				} else {
+					load = function(callback) {
+						app.initApp(function() {
+							callback && callback(app);
+						});
+					};
+				}
+				return load;
+			}(app.load));
 
 			_.each(app.requests, function(request, id) {
 				if (hasClusterFlag) {
