@@ -252,24 +252,58 @@ define(function(require) {
 		},
 
 		/**
-		 * Loads base apps before loading default app
+		 * Handles base/overlay apps loading before selected app load
 		 * @param  {Object} args
 		 * @param  {String} [args.defaultApp='appstore'|undefined]
 		 */
 		_loadApps: function(args) {
 			var self = this,
 				baseApps = self.getBaseApps(),
-				baseAppsTasks = _.map(baseApps, function(appName) {
-					return function(callback) {
-						monster.apps.load(appName, function() {
-							callback(null);
-						});
-					};
-				}),
+				overlayApps = _
+					.chain(monster.appsStpre)
+					.filter({ drawOverOtherApps: true })
+					.map('name')
+					.value(),
+				appsToLoad = _.concat(baseApps, overlayApps),
 				/* If admin with no app, go to app store, otherwise, oh well... */
 				defaultApp = _.get(args, 'defaultApp', monster.util.isAdmin() ? self._defaultApp : undefined);
 
-			monster.parallel(baseAppsTasks, function() {
+			monster.parallel(_.map(appsToLoad, function(appName) {
+				return function(parallelCallback) {
+					if (_.has(monster.apps, appName)) {
+						return parallelCallback(null);
+					}
+					monster.apps.load(appName, function() {
+						parallelCallback(null);
+					});
+				};
+			}), function() {
+				monster.parallel([
+					invokeOverlayRenderer,
+					renderSelectedApp
+				]);
+			});
+
+			function invokeOverlayRenderer(callback) {
+				monster.series(_.map(overlayApps, function(appName) {
+					return function(parallelCallback) {
+						monster.ui.confirm(
+							monster.appsStore[appName].i18n[monster.defaultLanguage].label + ' wants to render content on top of other apps',
+							function() {
+								monster.pub(appName + '.drawOverOtherApps.render');
+								parallelCallback(null);
+							},
+							function() {
+								parallelCallback(null);
+							},
+							{
+								isPersistent: true
+							}
+						);
+					};
+				}), callback);
+			}
+			function renderSelectedApp(callback) {
 				// Now that the user information is loaded properly, check if we tried to force the load of an app via URL.
 				monster.routing.parseHash();
 				if (monster.routing.hasMatch()) {
@@ -283,8 +317,9 @@ define(function(require) {
 					monster.pub('core.alerts.refresh');
 					self.showAppName(defaultApp);
 					app.render($('#monster_content'));
+					callback(null);
 				}, {}, true);
-			});
+			}
 		},
 
 		bindEvents: function(container) {
