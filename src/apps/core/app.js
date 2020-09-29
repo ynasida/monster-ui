@@ -103,18 +103,7 @@ define(function(require) {
 
 			container.append(mainTemplate);
 
-			self.loadIncludes(function(err, results) {
-				require(['hotjarTriggers'], function(module) {
-					_.each(module.subscribe, function(callback, topic) {
-						var cb = typeof callback === 'string' ? module[callback] : callback;
-						monster.sub(topic, cb, module);
-					});
-
-					self.loadAuth(); // do this here because subsequent apps are dependent upon core layout
-				}); //temporary
-
-			}); //include scripts for hotjar and other third party ones
-
+			self.loadAuth(); // do this here because subsequent apps are dependent upon core layout
 		},
 
 		loadSVG: function() {
@@ -149,14 +138,6 @@ define(function(require) {
 			var self = this;
 
 			monster.webphone.init();
-		},
-
-		loadIncludes: function(callback) {
-			monster.parallel(_.map(monster.config.whitelabel.includes, function(url) {
-				return function(next) {
-					require([url], next, next);
-				};
-			}), callback);
 		},
 
 		loadAuth: function() {
