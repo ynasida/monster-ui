@@ -749,6 +749,11 @@ $media-size-medium: "(max-width : 980px)";
 					height: 30px;
 					margin-top: 0.25rem;
 					margin-bottom: 0.25rem;
+
+					&.number-picker {
+						margin: 0;
+						padding: 0 0.5rem;
+					}
 				}
 			}
 		}
