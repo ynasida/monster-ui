@@ -51,6 +51,10 @@ define(function(require) {
 		},
 
 		subscribe: {
+			'auth.currentAppsStore.fetched': 'handleCurrentAppsStoreList',
+			'auth.currentAppsStore.updated': 'handleCurrentAppsStoreUpdate',
+			'auth.currentAppsStore.deleted': 'handleCurrentAppsStoreDelete',
+			'auth.currentUser.updated': 'handleCurrentUserUpdate',
 			'auth.logout': '_logout',
 			'auth.clickLogout': '_clickLogout',
 			'auth.initApp': '_initApp',
@@ -285,16 +289,6 @@ define(function(require) {
 				userId: data.data.owner_id
 			};
 
-			if ('apps' in data.data) {
-				self.installedApps = data.data.apps;
-			} else {
-				self.installedApps = [];
-				monster.ui.toast({
-					type: 'error',
-					message: self.i18n.active().toastrMessages.appListError
-				});
-			}
-
 			// We store the language so we can load the right language before having to query anything in our back-end. (no need to query account, user etc)
 			var cookieAuth = {
 				language: data.data.language,
@@ -341,8 +335,13 @@ define(function(require) {
 
 			monster.parallel({
 				appsStore: function(callback) {
-					self.getAppsStore(function(data) {
-						callback(null, data);
+					self.callApi({
+						resource: 'appsStore.list',
+						data: {
+							accountId: self.accountId
+						},
+						success: _.partial(callback, null),
+						error: callback
 					});
 				},
 				account: function(callback) {
@@ -366,8 +365,6 @@ define(function(require) {
 				}
 			},
 			function(err, results) {
-				var defaultApp;
-
 				if (err) {
 					monster.util.logoutAndReload();
 				} else {
@@ -382,49 +379,14 @@ define(function(require) {
 					results.user.apps = results.user.apps || {};
 					results.account.apps = results.account.apps || {};
 
+					self.currentUser = results.user;
+					// This account will remain unchanged, it should be used by non-masqueradable apps
+					self.originalAccount = results.account;
+					// This account will be overriden when masquerading, it should be used by masqueradable apps
+					self.currentAccount = $.extend(true, {}, self.originalAccount);
+
 					var afterLanguageLoaded = function() {
-						var fullAppList = _.keyBy(self.installedApps, 'id'),
-							defaultAppId = _.find(results.user.appList || [], function(appId) {
-								return fullAppList.hasOwnProperty(appId);
-							});
-
-						if (defaultAppId) {
-							defaultApp = fullAppList[defaultAppId].name;
-						} else if (self.installedApps.length > 0) {
-							defaultApp = self.installedApps[0].name;
-						}
-
-						monster.appsStore = _.keyBy(results.appsStore, 'name');
-
-						_.each(monster.appsStore, function(app) {
-							if (
-								!_.has(app, 'extends')
-								|| !_.isArray(app.extends)
-							) {
-								return;
-							}
-							_.each(app.extends, function(extended) {
-								if (
-									!_.isString(extended)
-									|| !_.has(monster.appsStore, extended)
-								) {
-									return;
-								}
-								if (_.chain(monster.appsStore).get([extended, 'extensions'], []).includes(app.name).value()) {
-									return;
-								}
-								if (!_.has(monster.appsStore, [extended, 'extensions'])) {
-									_.set(monster.appsStore, [extended, 'extensions'], []);
-								}
-								monster.appsStore[extended].extensions.push(app.name);
-							});
-						});
-
-						self.currentUser = results.user;
-						// This account will remain unchanged, it should be used by non-masqueradable apps
-						self.originalAccount = results.account;
-						// This account will be overriden when masquerading, it should be used by masqueradable apps
-						self.currentAccount = $.extend(true, {}, self.originalAccount);
+						var defaultApp = self.getCurrentUserDefaultAppName();
 
 						self.defaultApp = defaultApp;
 
@@ -438,7 +400,7 @@ define(function(require) {
 							$('#main_topbar_account_toggle_link').addClass('visible');
 						}
 
-						monster.pub('core.initializeShortcuts', dataLogin.apps);
+						monster.pub('core.initializeShortcuts', monster.util.listAppStoreMetadata('user'));
 						monster.pub('core.socket.start');
 						monster.pub('webphone.start');
 
@@ -1516,20 +1478,6 @@ define(function(require) {
 			});
 		},
 
-		getAppsStore: function(callback) {
-			var self = this;
-
-			self.callApi({
-				resource: 'appsStore.list',
-				data: {
-					accountId: self.accountId
-				},
-				success: function(_data) {
-					callback && callback(_data.data);
-				}
-			});
-		},
-
 		getUser: function(success, error) {
 			var self = this;
 
@@ -1555,26 +1503,27 @@ define(function(require) {
 		// Method used to authenticate other apps
 		_initApp: function(args) {
 			var self = this,
-				success = function(app) {
-					// If isMasqueradable flag is set in the code itself, use it, otherwise check if it's set in the DB, otherwise defaults to true
-					app.isMasqueradable = app.hasOwnProperty('isMasqueradable') ? app.isMasqueradable : (monster.appsStore.hasOwnProperty(app.name) ? monster.appsStore[app.name].masqueradable : true);
-					app.accountId = app.isMasqueradable && self.currentAccount ? self.currentAccount.id : self.accountId;
-					app.userId = self.userId;
+				app = args.app,
+				metadata = monster.util.getAppStoreMetadata(app.name),
+				callback = args.callback || function() {};
 
-					args.callback && args.callback();
-				},
-				installedApp = _.find(self.installedApps, function(val) {
-					return val.name === args.app.name;
-				});
-
-			if (installedApp && installedApp.api_url) {
-				args.app.apiUrl = installedApp.api_url;
-				if (args.app.apiUrl.substr(args.app.apiUrl.length - 1) !== '/') {
-					args.app.apiUrl += '/';
+			if (metadata && metadata.api_url) {
+				app.apiUrl = metadata.api_url;
+				if (app.apiUrl.substr(app.apiUrl.length - 1) !== '/') {
+					app.apiUrl += '/';
 				}
 			}
 
-			success(args.app);
+			// If isMasqueradable flag is set in the code itself, use it, otherwise check if it's set in the DB, otherwise defaults to true
+			app.isMasqueradable = _.find([
+				_.get(app, 'isMasqueradable'),
+				_.get(metadata, 'masqueradable'),
+				true
+			], _.isBoolean);
+			app.accountId = app.isMasqueradable && self.currentAccount ? self.currentAccount.id : self.accountId;
+			app.userId = self.userId;
+
+			callback();
 		},
 
 		triggerImpersonateUser: function(args) {
@@ -1611,6 +1560,148 @@ define(function(require) {
 					callback && callback(data);
 				}
 			});
+		},
+
+		maybeUpdateCurrentUserAppList: function(callback) {
+			var self = this,
+				appIdsList = _.map(monster.util.listAppStoreMetadata('user'), 'id'),
+				linkIdsList = _.map(monster.util.listAppLinks(), 'id'),
+				actionIdsList = _.flatten([
+					linkIdsList,
+					appIdsList
+				]),
+				currentActionIdsList = _.get(monster.apps, 'auth.currentUser.appList', []),
+				defaultActionId = _
+					.chain(currentActionIdsList)
+					.find(_.partial(_.includes, appIdsList))
+					.defaultTo(_.head(appIdsList))
+					.value(),
+				newActionIdsList = _.difference(actionIdsList, currentActionIdsList),
+				validCurrentActionIdsList = _
+					.chain(currentActionIdsList)
+					.filter(_.partial(_.includes, actionIdsList))
+					.difference(newActionIdsList)
+					.value(),
+				normalizedUserActionIdsList = _
+					.chain([
+						[defaultActionId],
+						newActionIdsList,
+						validCurrentActionIdsList
+					])
+					.flatten()
+					.reject(_.isUndefined)
+					.uniq()
+					.value();
+
+			if (
+				!_.has(monster.apps, 'auth.currentUser')
+				|| _.isEqual(currentActionIdsList, normalizedUserActionIdsList)
+			) {
+				return callback(null);
+			}
+			self.callApi({
+				resource: 'user.patch',
+				data: {
+					accountId: self.accountId,
+					userId: self.userId,
+					data: {
+						appList: normalizedUserActionIdsList
+					}
+				},
+				success: _.partial(callback, null),
+				error: _.partial(callback, null)
+			});
+		},
+
+		handleCurrentAppsStoreList: function(args) {
+			var self = this,
+				appsStore = _.get(args, 'response', {}),
+				callback = _.get(args, 'callback', function() {}),
+				resolveExtensions = function(apps) {
+					_.forEach(apps, function(app) {
+						if (
+							!_.has(app, 'extends')
+							|| !_.isArray(app.extends)
+						) {
+							return;
+						}
+						_.each(app.extends, function(extended) {
+							if (
+								!_.isString(extended)
+								|| !_.has(apps, extended)
+							) {
+								return;
+							}
+							if (_.chain(apps).get([extended, 'extensions'], []).includes(app.name).value()) {
+								return;
+							}
+							if (!_.has(apps, [extended, 'extensions'])) {
+								_.set(apps, [extended, 'extensions'], []);
+							}
+							apps[extended].extensions.push(app.name);
+						});
+					});
+					return apps;
+				};
+
+			monster.appsStore = resolveExtensions(appsStore);
+
+			self.maybeUpdateCurrentUserAppList(callback);
+		},
+
+		handleCurrentAppsStoreUpdate: function(args) {
+			var self = this,
+				data = _.get(args, 'request', {}),
+				callback = _.get(args, 'callback', function() {}),
+				app = _.find(monster.appsStore, { id: data.appId });
+
+			_.assign(app, _.pick(data.data, [
+				'allowed_users',
+				'users'
+			]));
+
+			self.maybeUpdateCurrentUserAppList(callback);
+		},
+
+		handleCurrentAppsStoreDelete: function(args) {
+			var self = this,
+				data = _.get(args, 'request', {}),
+				callback = _.get(args, 'callback', function() {}),
+				app = _.find(monster.appsStore, { id: data.appId });
+
+			_.forEach(['allowed_users', 'users'], _.partial(_.unset, app));
+
+			self.maybeUpdateCurrentUserAppList(callback);
+		},
+
+		handleCurrentUserUpdate: function(args) {
+			var self = this,
+				updatedUser = _.get(args, 'response', {}),
+				callback = _.get(args, 'callback', function() {}),
+				cookieData = monster.cookies.getJson('monster-auth');
+
+			self.currentUser = updatedUser;
+			self.defaultApp = self.getCurrentUserDefaultAppName();
+
+			// If auth cookie language is different than the user updated one, we update it.
+			if (cookieData.language !== updatedUser.language) {
+				monster.cookies.set('monster-auth', _.merge({}, cookieData, _.pick(updatedUser, [
+					'language'
+				])));
+			}
+
+			callback(null);
+		},
+
+		/**
+		 * Returns default app name for current user.
+		 * @return {String|Undefined} Default app name for current user.
+		 */
+		getCurrentUserDefaultAppName: function() {
+			return _.flow(
+				monster.util.getCurrentUserDefaultApp,
+				_.partial(_.get, _, 'name')
+			)();
 		}
 	};
 
