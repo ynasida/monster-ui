@@ -246,27 +246,27 @@ define(function(require) {
 
 		conferenceViewerFormatData: function(data, args) {
 			var self = this,
-				formattedData = {
-					backButton: args.backButton,
-					conference: {
-						id: data.conference.id,
-						name: data.conference.name,
-						duration: data.conference._read_only.duration,
-						isLocked: data.conference._read_only.is_locked,
-						participants: [],
-						moderators: []
-					}
-				};
+				users = self.conferenceViewerFormatUsers(data.participants),
+				moderators = _.filter(users, { is_moderator: true }),
+				participants = _.filter(users, { is_moderator: false }),
+				hasUsers = _.some([
+					moderators,
+					participants
+				], _.negate(_.isEmpty));
 
-			data.participants = self.conferenceViewerFormatUsers(data.participants);
-
-			_.each(data.participants, function(participant) {
-				participant.is_moderator ? formattedData.conference.moderators.push(participant) : formattedData.conference.participants.push(participant);
-			});
-
-			formattedData.conference.disabledActions = formattedData.conference.participants.length + formattedData.conference.moderators.length === 0;
-
-			return formattedData;
+			return {
+				backButton: args.backButton,
+				conference: _.merge({
+					disabledActions: !hasUsers,
+					duration: data.conference._read_only.duration,
+					isLocked: data.conference._read_only.is_locked,
+					participants: participants,
+					moderators: moderators
+				}, _.pick(data.conference, [
+					'id',
+					'name'
+				]))
+			};
 		},
 
 		conferenceViewerFormatParticipant: function(oldParticipant) {
